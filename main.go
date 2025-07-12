@@ -111,6 +111,7 @@ func main() {
 		Info *struct {
 			cardArg
 		} `arg:"subcommand:info" help:"query more information about a specific card (and optionally a slot)"`
+
 		Generate *struct {
 			cardArg
 			slotArg
@@ -174,6 +175,7 @@ func main() {
 
 		// TODO Metadata
 
+		// TODO Go sucks, so this map order is gonna be random (my kindom for an order-preserving native map type)
 		for k, o := range slotObjectMap {
 			slot := piv.Slot{Key: uint32(k), Object: o}
 			cert, err := yubi.Certificate(slot)
