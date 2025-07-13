@@ -98,10 +98,10 @@ func (s *HexString) UnmarshalText(src []byte) error {
 }
 
 type cardArg struct {
-	Card Card `arg:"required,env:YUBECDSA_CARD" placeholder:"0" help:"selected card; serial number ('12345'), card string ('Yubico YubiKey CCID 00 00'), or index ('0')"`
+	Card Card `arg:"required,env:CARD" placeholder:"0" help:"selected card; serial number ('12345'), card string ('Yubico YubiKey CCID 00 00'), or index ('0')"`
 }
 type slotArg struct {
-	Slot Slot `arg:"required,env:YUBECDSA_SLOT" placeholder:"9c" help:"selected slot"`
+	Slot Slot `arg:"required,env:SLOT" placeholder:"9c" help:"selected slot"`
 }
 
 func main() {
@@ -125,7 +125,7 @@ func main() {
 		} `arg:"subcommand:sign" help:"sign a digest"`
 	}
 	p, err := arg.NewParser(arg.Config{
-		//EnvPrefix: "YUBECDSA_", // TODO https://github.com/alexflint/go-arg/issues/286 (not released yet)
+		EnvPrefix: "YUBECDSA_",
 
 		Program: os.Args[0],
 	}, &args)
