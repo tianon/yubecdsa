@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -9,8 +10,11 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
+	"log"
+	"log/slog"
 	"math/big"
 	"os"
+	"os/signal"
 	"strconv"
 	"time"
 
@@ -105,6 +109,16 @@ type slotArg struct {
 }
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	_ = ctx // TODO use context
+
+	var slogLevel = new(slog.LevelVar) // defaults to Info
+	slogHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slogLevel,
+	})
+	slog.SetDefault(slog.New(slogHandler))
+
 	var args struct {
 		List *struct{} `arg:"subcommand:list" help:"list all connected cards (and their serials)"`
 
@@ -130,7 +144,7 @@ func main() {
 		Program: os.Args[0],
 	}, &args)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	p.MustParse(os.Args[1:])
 
@@ -138,9 +152,11 @@ func main() {
 	default:
 		fallthrough // the "list" command is what we should do if we get no explict subcommand
 	case args.List != nil:
+		// TODO machine-readable output
+
 		cards, err := piv.Cards()
 		if err != nil {
-			panic(err)
+			log.Fatalf("failed to list cards: %v", err)
 		}
 		for _, card := range cards {
 			serialString := "unknown"
@@ -154,6 +170,8 @@ func main() {
 		}
 
 	case args.Info != nil:
+		// TODO machine-readable output
+
 		sub := args.Info
 		yubi := sub.Card
 		defer yubi.Close()
@@ -161,7 +179,7 @@ func main() {
 		if serial, err := yubi.Serial(); err == nil {
 			fmt.Printf("Serial: %d\n", serial)
 		} else {
-			fmt.Printf("Serial: ERROR: %v\n", err)
+			fmt.Printf("Serial: ERROR: %v\n", err) // TODO errors to logger instead of output?
 		}
 
 		v := yubi.Version()
@@ -170,7 +188,7 @@ func main() {
 		if retries, err := yubi.Retries(); err == nil {
 			fmt.Printf("Retries: %d\n", retries)
 		} else {
-			fmt.Printf("Retries: ERROR: %v\n", err)
+			fmt.Printf("Retries: ERROR: %v\n", err) // TODO errors to logger instead of output?
 		}
 
 		// TODO Metadata
@@ -180,7 +198,7 @@ func main() {
 			slot := piv.Slot{Key: uint32(k), Object: o}
 			cert, err := yubi.Certificate(slot)
 			if err != nil {
-				continue
+				continue // TODO errors to logger? (have to filter "not found" type errors)
 			}
 
 			fmt.Printf("Slot %02x certificate public key:\n", slot.Key)
@@ -188,7 +206,7 @@ func main() {
 			// print out public key in PEM format
 			pubBytes, err := x509.MarshalPKIXPublicKey(cert.PublicKey)
 			if err != nil {
-				panic(err)
+				log.Fatalf("failed to marshal public key for slot %02x: %v", slot.Key, err)
 			}
 			pem.Encode(os.Stdout, &pem.Block{
 				Type:  "PUBLIC KEY",
@@ -197,6 +215,8 @@ func main() {
 
 			// TODO KeyInfo?
 		}
+
+		// TODO subcommand to get *just* the public key of a given slot out of the x509 cert?
 
 	case args.Generate != nil:
 		sub := args.Generate
@@ -216,13 +236,13 @@ func main() {
 			TouchPolicy: piv.TouchPolicyNever,
 		})
 		if err != nil {
-			panic(err)
+			log.Fatalf("failed to GenerateKey: %v", err)
 		}
 
 		auth := piv.KeyAuth{PIN: piv.DefaultPIN} // TODO user-specifiable
 		priv, err := yubi.PrivateKey(slot, pub, auth)
 		if err != nil {
-			panic(err)
+			log.Fatalf("failed to PrivateKey: %v", err)
 		}
 
 		cert := &x509.Certificate{
@@ -236,18 +256,18 @@ func main() {
 		}
 		cert.Raw, err = x509.CreateCertificate(nil, cert, cert, pub, priv)
 		if err != nil {
-			panic(err)
+			log.Fatalf("failed to CreateCertificate: %v", err)
 		}
 
 		err = yubi.SetCertificate(managementKey, slot, cert)
 		if err != nil {
-			panic(err)
+			log.Fatalf("failed to SetCertificate: %v", err)
 		}
 
 		// print out "pub" in PEM format
 		pubBytes, err := x509.MarshalPKIXPublicKey(pub)
 		if err != nil {
-			panic(err)
+			log.Fatalf("failed to marshal public key: %v", err)
 		}
 		pem.Encode(os.Stdout, &pem.Block{
 			Type:  "PUBLIC KEY",
@@ -280,18 +300,18 @@ func main() {
 
 		priv, err := yubi.PrivateKey(slot, pub, auth)
 		if err != nil {
-			panic(err)
+			log.Fatalf("failed to PrivateKey: %v", err)
 		}
 
 		signer, ok := priv.(crypto.Signer)
 		if !ok {
-			panic("library returned something that is not a Signer")
+			panic("piv library returned something that is not a Signer")
 		}
 
 		// we provide a nil rand reader because the on-device RNG should be used instead
 		signature, err := signer.Sign(nil, sub.Digest, nil)
 		if err != nil {
-			panic(err)
+			log.Fatalf("failed to Sign: %v", err)
 		}
 
 		fmt.Println(base64.StdEncoding.EncodeToString(signature))
