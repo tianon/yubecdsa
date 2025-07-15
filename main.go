@@ -102,10 +102,15 @@ func (s *HexString) UnmarshalText(src []byte) error {
 }
 
 type cardArg struct {
-	Card Card `arg:"required,env:CARD" placeholder:"0" help:"selected card; serial number ('12345'), card string ('Yubico YubiKey CCID 00 00'), or index ('0')"`
+	Card Card `arg:"required,env:CARD" help:"selected card; serial number ('12345'), card string ('Yubico YubiKey CCID 00 00'), or index ('0')"`
 }
 type slotArg struct {
-	Slot Slot `arg:"required,env:SLOT" placeholder:"9c" help:"selected slot"`
+	Slot Slot `arg:"required,env:SLOT" help:"selected slot ('9c', etc)"`
+}
+type pinArg struct {
+	// TODO add support for reading PIN from a file?  maybe have this create/provide a KeyAuth struct directly with a suitable PINPrompt so it can pull up a file's contents?  look at more weird go-arg stuff?
+	// TODO allow for a "prompt" special case that asks for the pin interactively?
+	PIN string `arg:"env:PIN" default:"123456" help:"authentication PIN"` // https://pkg.go.dev/github.com/go-piv/piv-go/v2/piv#DefaultPIN
 }
 
 func main() {
@@ -129,12 +134,14 @@ func main() {
 		Generate *struct {
 			cardArg
 			slotArg
-			// TODO more parameters
+			pinArg
+			// TODO management key?
 		} `arg:"subcommand:generate" help:"generate a new key (WILL OVERWRITE)"`
 
 		Sign *struct {
 			cardArg
 			slotArg
+			pinArg
 			Digest HexString `arg:"positional,required" placeholder:"SHA256"`
 		} `arg:"subcommand:sign" help:"sign a digest"`
 	}
@@ -239,7 +246,7 @@ func main() {
 			log.Fatalf("failed to GenerateKey: %v", err)
 		}
 
-		auth := piv.KeyAuth{PIN: piv.DefaultPIN} // TODO user-specifiable
+		auth := piv.KeyAuth{PIN: sub.PIN}
 		priv, err := yubi.PrivateKey(slot, pub, auth)
 		if err != nil {
 			log.Fatalf("failed to PrivateKey: %v", err)
@@ -285,7 +292,7 @@ func main() {
 			p.FailSubcommand(fmt.Sprintf("digest must be exactly 32 bytes (not %d)", len(sub.Digest)), "sign")
 		}
 
-		auth := piv.KeyAuth{PIN: piv.DefaultPIN} // TODO user-specifiable
+		auth := piv.KeyAuth{PIN: sub.PIN}
 
 		// we need a public key so that it knows which algorithm to use -- we'll try querying the corresponding certificate from the key and use that if it exists, but otherwise we'll fall back to something fake that hard-codes ECDSA P-256
 		var pub any
