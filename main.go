@@ -287,7 +287,7 @@ func main() {
 		defer yubi.Close()
 		slot := piv.Slot(sub.Slot)
 
-		// TODO get cert earlier and just make sure our hash is at most as many bytes as our algorithm can handle?  ie, P-256 can handle at most 32 (256/8), but P-384 can handle up to 48 (384/8), and eventually Yubi might support P-521 which can handle up to 65 bytes (just slightly bigger than 512)
+		// TODO get cert earlier and just make sure our hash is at most as many bytes as our algorithm can handle?  ie, P-256 can handle at most 32 (256/8), but P-384 can handle up to 48 (384/8), and eventually Yubi might support P-521 which can handle up to 65 bytes (just slightly bigger than 512) -- see "pubKey.Params().BitSize"
 		if len(sub.Digest) != 32 {
 			p.FailSubcommand(fmt.Sprintf("digest must be exactly 32 bytes (not %d)", len(sub.Digest)), "sign")
 		}
