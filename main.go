@@ -22,11 +22,11 @@ import (
 	"github.com/go-piv/piv-go/v2/piv"
 )
 
+var pivClient = piv.Client{Shared: true}
+
 // a helper for "piv.Open" that supports either a card string like "opensc-tool --list-readers" outputs ("Yubico YubiKey CCID 00 00") or a serial number ("NNNNNN") via linear search (yes, horrifying, but we have no choice because we have to open a card to check the serial number)
 func open(cardOrSerial string) (*piv.YubiKey, error) {
-	client := piv.Client{Shared: true}
-
-	yubi, topErr := client.Open(cardOrSerial)
+	yubi, topErr := pivClient.Open(cardOrSerial)
 	if topErr == nil {
 		return yubi, nil
 	}
@@ -38,18 +38,18 @@ func open(cardOrSerial string) (*piv.YubiKey, error) {
 	}
 	lookingForSerial := uint32(lookingForSerial64)
 
-	cards, err := piv.Cards()
+	cards, err := pivClient.Cards()
 	if err != nil {
 		return nil, err
 	}
 
 	// if "lookingForSerial" is less than len(cards), it's probably an index like "0", "1", etc
 	if int(lookingForSerial) < len(cards) {
-		return client.Open(cards[lookingForSerial])
+		return pivClient.Open(cards[lookingForSerial])
 	}
 
 	for _, card := range cards {
-		if yubi, err := client.Open(card); err == nil {
+		if yubi, err := pivClient.Open(card); err == nil {
 			if serial, err := yubi.Serial(); err == nil && serial == lookingForSerial {
 				return yubi, nil
 			}
@@ -163,13 +163,13 @@ func main() {
 	case args.List != nil:
 		// TODO machine-readable output
 
-		cards, err := piv.Cards()
+		cards, err := pivClient.Cards()
 		if err != nil {
 			log.Fatalf("failed to list cards: %v", err)
 		}
 		for _, card := range cards {
 			serialString := "unknown"
-			if yubi, err := piv.Open(card); err == nil {
+			if yubi, err := pivClient.Open(card); err == nil {
 				if serial, err := yubi.Serial(); err == nil {
 					serialString = strconv.FormatUint(uint64(serial), 10)
 				} // TODO verbose flag for errors?
