@@ -24,7 +24,9 @@ import (
 
 // a helper for "piv.Open" that supports either a card string like "opensc-tool --list-readers" outputs ("Yubico YubiKey CCID 00 00") or a serial number ("NNNNNN") via linear search (yes, horrifying, but we have no choice because we have to open a card to check the serial number)
 func open(cardOrSerial string) (*piv.YubiKey, error) {
-	yubi, topErr := piv.Open(cardOrSerial)
+	client := piv.Client{Shared: true}
+
+	yubi, topErr := client.Open(cardOrSerial)
 	if topErr == nil {
 		return yubi, nil
 	}
@@ -43,11 +45,11 @@ func open(cardOrSerial string) (*piv.YubiKey, error) {
 
 	// if "lookingForSerial" is less than len(cards), it's probably an index like "0", "1", etc
 	if int(lookingForSerial) < len(cards) {
-		return piv.Open(cards[lookingForSerial])
+		return client.Open(cards[lookingForSerial])
 	}
 
 	for _, card := range cards {
-		if yubi, err := piv.Open(card); err == nil {
+		if yubi, err := client.Open(card); err == nil {
 			if serial, err := yubi.Serial(); err == nil && serial == lookingForSerial {
 				return yubi, nil
 			}
