@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -19,12 +16,13 @@ import (
 	"time"
 
 	"github.com/alexflint/go-arg"
-	"github.com/go-piv/piv-go/v2/piv"
+	"pault.ag/go/ykpiv"
 )
 
-// a helper for "piv.Open" that supports either a card string like "opensc-tool --list-readers" outputs ("Yubico YubiKey CCID 00 00") or a serial number ("NNNNNN") via linear search (yes, horrifying, but we have no choice because we have to open a card to check the serial number)
-func open(cardOrSerial string) (*piv.YubiKey, error) {
-	yubi, topErr := piv.Open(cardOrSerial)
+// a helper for "ykpiv.New" that supports either a card string like "opensc-tool --list-readers" outputs ("Yubico YubiKey CCID 00 00") or a serial number ("NNNNNN") via linear search (yes, horrifying, but we have no choice because we have to open a card to check the serial number)
+func open(cardOrSerial string, opts ykpiv.Options) (*ykpiv.Yubikey, error) {
+	opts.Reader = cardOrSerial
+	yubi, topErr := ykpiv.New(opts)
 	if topErr == nil {
 		return yubi, nil
 	}
@@ -36,18 +34,19 @@ func open(cardOrSerial string) (*piv.YubiKey, error) {
 	}
 	lookingForSerial := uint32(lookingForSerial64)
 
-	cards, err := piv.Cards()
+	cards, err := ykpiv.Readers()
 	if err != nil {
 		return nil, err
 	}
 
 	// if "lookingForSerial" is less than len(cards), it's probably an index like "0", "1", etc
 	if int(lookingForSerial) < len(cards) {
-		return piv.Open(cards[lookingForSerial])
+		opts.Reader = cards[lookingForSerial]
+		return ykpiv.New(opts)
 	}
 
-	for _, card := range cards {
-		if yubi, err := piv.Open(card); err == nil {
+	for _, opts.Reader = range cards {
+		if yubi, err := ykpiv.New(opts); err == nil {
 			if serial, err := yubi.Serial(); err == nil && serial == lookingForSerial {
 				return yubi, nil
 			}
@@ -58,20 +57,7 @@ func open(cardOrSerial string) (*piv.YubiKey, error) {
 	return nil, topErr
 }
 
-type Card struct {
-	*piv.YubiKey `arg:"-"`
-}
-
-func (c *Card) UnmarshalText(b []byte) error {
-	yubi, err := open(string(b))
-	if err != nil {
-		return err
-	}
-	c.YubiKey = yubi
-	return nil
-}
-
-type Slot piv.Slot
+type Slot ykpiv.SlotId
 
 func (s *Slot) UnmarshalText(b []byte) error {
 	slotKey, err := strconv.ParseUint(string(b), 16, 8) // "9c", etc
@@ -82,8 +68,9 @@ func (s *Slot) UnmarshalText(b []byte) error {
 	if !ok {
 		return fmt.Errorf("'%02x' is not a valid slot for ECDSA", slotKey)
 	}
-	s.Key = uint32(slotKey)
-	s.Object = object
+	s.Key = int32(slotKey)
+	s.Certificate = int32(object)
+	s.Name = fmt.Sprintf("slot %02x", slotKey) // TODO add Name to slot-map.go if we commit to ykpiv
 	return nil
 }
 
@@ -102,7 +89,7 @@ func (s *HexString) UnmarshalText(src []byte) error {
 }
 
 type cardArg struct {
-	Card Card `arg:"required,env:CARD" help:"selected card; serial number ('12345'), card string ('Yubico YubiKey CCID 00 00'), or index ('0')"`
+	Card string `arg:"required,env:CARD" help:"selected card; serial number ('12345'), card string ('Yubico YubiKey CCID 00 00'), or index ('0')"`
 }
 type slotArg struct {
 	Slot Slot `arg:"required,env:SLOT" help:"selected slot ('9c', etc)"`
@@ -161,13 +148,13 @@ func main() {
 	case args.List != nil:
 		// TODO machine-readable output
 
-		cards, err := piv.Cards()
+		cards, err := ykpiv.Readers()
 		if err != nil {
 			log.Fatalf("failed to list cards: %v", err)
 		}
 		for _, card := range cards {
 			serialString := "unknown"
-			if yubi, err := piv.Open(card); err == nil {
+			if yubi, err := ykpiv.New(ykpiv.Options{Reader: card}); err == nil {
 				if serial, err := yubi.Serial(); err == nil {
 					serialString = strconv.FormatUint(uint64(serial), 10)
 				} // TODO verbose flag for errors?
@@ -180,7 +167,10 @@ func main() {
 		// TODO machine-readable output
 
 		sub := args.Info
-		yubi := sub.Card
+		yubi, err := open(sub.Card, ykpiv.Options{})
+		if err != nil {
+			p.FailSubcommand(err.Error(), "info")
+		}
 		defer yubi.Close()
 
 		if serial, err := yubi.Serial(); err == nil {
@@ -189,10 +179,13 @@ func main() {
 			fmt.Printf("Serial: ERROR: %v\n", err) // TODO errors to logger instead of output?
 		}
 
-		v := yubi.Version()
-		fmt.Printf("Version: %d.%d.%d\n", v.Major, v.Minor, v.Patch)
+		if v, err := yubi.Version(); err == nil {
+			fmt.Printf("Version: %s\n", string(v))
+		} else {
+			fmt.Printf("Version: ERROR: %v\n", err) // TODO errors to logger instead of output?
+		}
 
-		if retries, err := yubi.Retries(); err == nil {
+		if retries, err := yubi.PINRetries(); err == nil {
 			fmt.Printf("Retries: %d\n", retries)
 		} else {
 			fmt.Printf("Retries: ERROR: %v\n", err) // TODO errors to logger instead of output?
@@ -202,8 +195,8 @@ func main() {
 
 		// TODO Go sucks, so this map order is gonna be random (my kindom for an order-preserving native map type)
 		for k, o := range slotObjectMap {
-			slot := piv.Slot{Key: uint32(k), Object: o}
-			cert, err := yubi.Certificate(slot)
+			slot := ykpiv.SlotId{Key: int32(k), Certificate: int32(o), Name: fmt.Sprintf("slot %02x", k)} // TODO name in slotObjectMap
+			cert, err := yubi.GetCertificate(slot)
 			if err != nil {
 				continue // TODO errors to logger? (have to filter "not found" type errors)
 			}
@@ -227,30 +220,24 @@ func main() {
 
 	case args.Generate != nil:
 		sub := args.Generate
-		yubi := sub.Card
+		yubi, err := open(sub.Card, ykpiv.Options{PIN: &sub.PIN})
+		if err != nil {
+			p.FailSubcommand(err.Error(), "info")
+		}
 		defer yubi.Close()
-		slot := piv.Slot(sub.Slot)
+		slot := ykpiv.SlotId(sub.Slot)
 
-		var managementKey []byte = piv.DefaultManagementKey // TODO user-specifiable
+		// TODO var managementKey []byte = piv.DefaultManagementKey // TODO user-specifiable
 
 		// "GenerateKey" + "SetCertificate" so the public key is retrievable later
 
 		now := time.Now() // store the current time of generation so we can embed it into our x509 (which is all bogus anyhow so this is just informational)
-		pub, err := yubi.GenerateKey(managementKey, slot, piv.Key{
-			// TODO args for all these parameters?
-			Algorithm:   piv.AlgorithmEC256,
-			PINPolicy:   piv.PINPolicyAlways,
-			TouchPolicy: piv.TouchPolicyNever,
-		})
+		// TODO args for these parameters?
+		slotObj, err := yubi.GenerateECWithPolicies(slot, 256, ykpiv.PinPolicyAlways, ykpiv.TouchPolicyNever)
 		if err != nil {
 			log.Fatalf("failed to GenerateKey: %v", err)
 		}
-
-		auth := piv.KeyAuth{PIN: sub.PIN}
-		priv, err := yubi.PrivateKey(slot, pub, auth)
-		if err != nil {
-			log.Fatalf("failed to PrivateKey: %v", err)
-		}
+		pub := slotObj.PublicKey
 
 		cert := &x509.Certificate{
 			PublicKey: pub,
@@ -261,12 +248,12 @@ func main() {
 			// specifying this avoids CreateCertificate using "rand" (which we set to nil below)
 			SerialNumber: big.NewInt(0),
 		}
-		cert.Raw, err = x509.CreateCertificate(nil, cert, cert, pub, priv)
+		cert.Raw, err = x509.CreateCertificate(nil, cert, cert, pub, slotObj)
 		if err != nil {
 			log.Fatalf("failed to CreateCertificate: %v", err)
 		}
 
-		err = yubi.SetCertificate(managementKey, slot, cert)
+		err = slotObj.Update(*cert)
 		if err != nil {
 			log.Fatalf("failed to SetCertificate: %v", err)
 		}
@@ -283,40 +270,29 @@ func main() {
 
 	case args.Sign != nil:
 		sub := args.Sign
-		yubi := sub.Card
+		yubi, err := open(sub.Card, ykpiv.Options{PIN: &sub.PIN, ManagementKey: []byte{
+			0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+			0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+			0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+		}})
+		if err != nil {
+			p.FailSubcommand(err.Error(), "info")
+		}
 		defer yubi.Close()
-		slot := piv.Slot(sub.Slot)
+		slot := ykpiv.SlotId(sub.Slot)
 
 		// TODO get cert earlier and just make sure our hash is at most as many bytes as our algorithm can handle?  ie, P-256 can handle at most 32 (256/8), but P-384 can handle up to 48 (384/8), and eventually Yubi might support P-521 which can handle up to 65 bytes (just slightly bigger than 512) -- see "pubKey.Params().BitSize"
 		if len(sub.Digest) != 32 {
 			p.FailSubcommand(fmt.Sprintf("digest must be exactly 32 bytes (not %d)", len(sub.Digest)), "sign")
 		}
 
-		auth := piv.KeyAuth{PIN: sub.PIN}
-
-		// we need a public key so that it knows which algorithm to use -- we'll try querying the corresponding certificate from the key and use that if it exists, but otherwise we'll fall back to something fake that hard-codes ECDSA P-256
-		var pub any
-		if cert, err := yubi.Certificate(slot); err == nil {
-			pub = cert.PublicKey
-		} else {
-			// the public key is used primarily for determining what kind of signature we're trying to make (https://github.com/go-piv/piv-go/blob/2fae46569ad594c2c4bdd57f696967ac396e1d5e/v2/piv/key.go#L1000) and the bit size / algorithm to use (https://github.com/go-piv/piv-go/blob/2fae46569ad594c2c4bdd57f696967ac396e1d5e/v2/piv/key.go#L1330)
-			pub = &ecdsa.PublicKey{
-				Curve: elliptic.P256(),
-			}
-		}
-
-		priv, err := yubi.PrivateKey(slot, pub, auth)
+		slotObj, err := yubi.Slot(slot)
 		if err != nil {
-			log.Fatalf("failed to PrivateKey: %v", err)
-		}
-
-		signer, ok := priv.(crypto.Signer)
-		if !ok {
-			panic("piv library returned something that is not a Signer")
+			log.Fatalf("failed to Slot: %v", err)
 		}
 
 		// we provide a nil rand reader because the on-device RNG should be used instead
-		signature, err := signer.Sign(nil, sub.Digest, nil)
+		signature, err := slotObj.Sign(nil, sub.Digest, nil)
 		if err != nil {
 			log.Fatalf("failed to Sign: %v", err)
 		}
