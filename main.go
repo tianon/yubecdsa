@@ -12,9 +12,11 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"maps"
 	"math/big"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"time"
 
@@ -202,9 +204,9 @@ func main() {
 
 		// TODO Metadata
 
-		// TODO Go sucks, so this map order is gonna be random (my kindom for an order-preserving native map type)
-		for k, o := range slotObjectMap {
-			slot := piv.Slot{Key: uint32(k), Object: o}
+		// Go sucks, so without this nonsense expression, the map iteration order is random (my kindom for an order-preserving native map type)
+		for _, k := range slices.Sorted(maps.Keys(slotObjectMap)) {
+			slot := piv.Slot{Key: uint32(k), Object: slotObjectMap[k]}
 			cert, err := yubi.Certificate(slot)
 			if err != nil {
 				continue // TODO errors to logger? (have to filter "not found" type errors)
