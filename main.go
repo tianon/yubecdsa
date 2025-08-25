@@ -135,6 +135,7 @@ func main() {
 			cardArg
 		} `arg:"subcommand:info" help:"query more information about a specific card (and optionally a slot)"`
 
+		// TODO add a really heinous required flag like `--please-be-destructive=yes` to "generate" (and add a similarly nuclear "reset" subcommand)
 		Generate *struct {
 			cardArg
 			slotArg
@@ -261,6 +262,7 @@ func main() {
 
 			NotBefore: now,
 			// TODO Subject?  Issuer?  NotAfter?  KeyUsage?  https://pkg.go.dev/crypto/x509#Certificate
+			// TODO maybe we set Issuer to something that identifies yubecdsa as the tool that triggered the key generation? 👀
 
 			// specifying this avoids CreateCertificate using "rand" (which we set to nil below)
 			SerialNumber: big.NewInt(0),
