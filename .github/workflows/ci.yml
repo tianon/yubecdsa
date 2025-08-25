@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+defaults:
+  run:
+    shell: 'bash -Eeuo pipefail -x {0}'
+
+jobs:
+
+  test:
+    strategy:
+      matrix:
+        go:
+          # https://github.com/actions/setup-go/tree/v5#getting-go-version-from-the-gomod-file
+          # https://github.com/actions/setup-go/tree/v5#using-stableoldstable-aliases
+          - stable
+          - oldstable
+          - go.mod
+    name: Test (${{ matrix.go }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libpcsclite-dev pcscd
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version:      ${{ matrix.go != 'go.mod' && matrix.go || null }}
+          go-version-file: ${{ matrix.go == 'go.mod' && matrix.go || null }}
+          cache-dependency-path: go.sum
+      - name: build
+        run: go build -o yubecdsa -trimpath -ldflags '-w' -v .
+      - run: ./yubecdsa --help
+      # TODO - run: ./yubecdsa list # "failed to list cards: connecting to pcsc: access was denied because of a security violation"
+      # TODO figure out if there's like, a YubiKey emulator we can use for real testing here?
