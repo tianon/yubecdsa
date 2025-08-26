@@ -212,7 +212,7 @@ func main() {
 		// TODO Metadata
 
 		// Go sucks, so without this nonsense expression, the map iteration order is random (my kindom for an order-preserving native map type)
-		for _, k := range slices.Sorted(maps.Keys(slotObjectMap)) {
+		for _, k := range slices.Sorted(maps.Keys(slotObjectMap)) { // TODO custom sort order so that 9c is first?  at the very least 9a-9d should come before 82-95
 			slot := piv.Slot{Key: uint32(k), Object: slotObjectMap[k]}
 			cert, err := yubi.Certificate(slot)
 			if err != nil {
