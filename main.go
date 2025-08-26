@@ -116,6 +116,10 @@ type pinArg struct {
 	// TODO allow for a "prompt" special case that asks for the pin interactively?
 	PIN string `arg:"env:PIN" default:"123456" help:"authentication PIN"` // https://pkg.go.dev/github.com/go-piv/piv-go/v2/piv#DefaultPIN
 }
+type managementArg struct {
+	// TODO add support for reading from a file?  prompt?  see above
+	ManagementKey HexString `arg:"env:MANAGEMENT_KEY" help:"management key" default:"010203040506070801020304050607080102030405060708"` // https://pkg.go.dev/github.com/go-piv/piv-go/v2/piv#DefaultManagementKey
+}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -140,7 +144,7 @@ func main() {
 			cardArg
 			slotArg
 			pinArg
-			// TODO management key?
+			managementArg
 		} `arg:"subcommand:generate" help:"generate a new key (WILL OVERWRITE)"`
 
 		Sign *struct {
@@ -236,12 +240,10 @@ func main() {
 		defer yubi.Close()
 		slot := piv.Slot(sub.Slot)
 
-		var managementKey []byte = piv.DefaultManagementKey // TODO user-specifiable
-
 		// "GenerateKey" + "SetCertificate" so the public key is retrievable later
 
 		now := time.Now() // store the current time of generation so we can embed it into our x509 (which is all bogus anyhow so this is just informational)
-		pub, err := yubi.GenerateKey(managementKey, slot, piv.Key{
+		pub, err := yubi.GenerateKey(sub.ManagementKey, slot, piv.Key{
 			// TODO args for all these parameters?
 			Algorithm:   piv.AlgorithmEC256,
 			PINPolicy:   piv.PINPolicyAlways,
@@ -272,7 +274,7 @@ func main() {
 			log.Fatalf("failed to CreateCertificate: %v", err)
 		}
 
-		err = yubi.SetCertificate(managementKey, slot, cert)
+		err = yubi.SetCertificate(sub.ManagementKey, slot, cert)
 		if err != nil {
 			log.Fatalf("failed to SetCertificate: %v", err)
 		}
