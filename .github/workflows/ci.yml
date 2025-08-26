@@ -26,6 +26,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libpcsclite-dev pcscd
+          # https://salsa.debian.org/debian/pcsc-lite/-/blob/9eece21e6ec7f9ea767c24c103d390c31eb628aa/doc/README.polkit#L35-40
+          user="$(id -un)"
+          sudo tee /etc/polkit-1/rules.d/yubikeys.rules <<EOF
+            polkit.addRule(function(action, subject) {
+                if (
+                  action.id == "org.debian.pcsc-lite.access_pcsc"
+                  && subject.user == "$user"
+                ) {
+                    return polkit.Result.YES;
+                }
+            });
+          EOF
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
@@ -35,5 +47,5 @@ jobs:
       - name: build
         run: go build -o yubecdsa -trimpath -ldflags '-w' -v .
       - run: ./yubecdsa --help
-      # TODO - run: ./yubecdsa list # "failed to list cards: connecting to pcsc: access was denied because of a security violation"
+      - run: ./yubecdsa list
       # TODO figure out if there's like, a YubiKey emulator we can use for real testing here?
