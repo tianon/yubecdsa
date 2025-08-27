@@ -119,7 +119,7 @@ type pinArg struct {
 }
 type managementArg struct {
 	// TODO add support for reading from a file?  prompt?  see above
-	ManagementKey HexString `arg:"env:MANAGEMENT_KEY" help:"management key" default:"010203040506070801020304050607080102030405060708"` // https://pkg.go.dev/github.com/go-piv/piv-go/v2/piv#DefaultManagementKey
+	ManagementKey HexString `arg:"--management-key,env:MANAGEMENT_KEY" help:"management key" default:"010203040506070801020304050607080102030405060708"` // https://pkg.go.dev/github.com/go-piv/piv-go/v2/piv#DefaultManagementKey
 }
 
 func main() {
